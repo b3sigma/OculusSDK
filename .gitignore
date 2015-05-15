@@ -8,3 +8,9 @@
 *.suo
 *.sdf
 *.opensdf
+*.vcxproj.user
+
+# generated files from the build process that weren't in the sdk zip
+**/OVR_ForceRebuildNoCheckin.h
+**/LibOVRKernel/Src/Util/Shaders/Blt_ps.h
+**/LibOVRKernel/Src/Util/Shaders/Blt_vs.h
