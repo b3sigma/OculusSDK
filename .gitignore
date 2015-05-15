@@ -1,0 +1,9 @@
+**/Debug/*
+**/Release/*
+**/Bin/*
+**/Obj/*
+*.exe
+*.pdb
+*.ilk
+*.suo
+*.sdf
