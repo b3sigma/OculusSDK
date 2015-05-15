@@ -33,7 +33,20 @@ void OculusWorldDemoApp::InitMainFilePath()
 {
     // We try alternative relative locations for the file.
     const String contentBase = pPlatform->GetContentDirectory() + "/" + WORLDDEMO_ASSET_PATH1;
-    const char* baseDirectories[] = { "", contentBase.ToCStr(), WORLDDEMO_ASSET_PATH2, WORLDDEMO_ASSET_PATH3, WORLDDEMO_ASSET_PATH4 };
+    const char* baseDirectories[] = { "",
+                                      contentBase.ToCStr(),
+                                      WORLDDEMO_ASSET_PATH2,
+                                      WORLDDEMO_ASSET_PATH3,
+                                      WORLDDEMO_ASSET_PATH4,
+                                      WORLDDEMO_ASSET_PATH5,
+                                      WORLDDEMO_ASSET_PATH6,
+                                      WORLDDEMO_ASSET_PATH7,
+                                      #ifdef SHRDIR
+                                          #define STR1(x) #x
+                                          #define STR(x)  STR1(x)
+                                          STR(SHRDIR) "/OculusWorldDemo/Assets/Tuscany/"
+                                      #endif
+                                      };
     String newPath;
 
     for(size_t i = 0; i < OVR_ARRAY_COUNT(baseDirectories); ++i)
@@ -99,7 +112,7 @@ Fill* CreateTextureFill(RenderDevice* prender, const String& filename)
     Ptr<File>    imageFile = *new SysFile(filename);
     Ptr<Texture> imageTex;
     if (imageFile->IsValid())
-        imageTex = *LoadTextureTga(prender, imageFile);
+        imageTex = *LoadTextureTgaTopDown(prender, imageFile);
 
     // Image is rendered as a single quad.
     ShaderFill* fill = 0;
@@ -148,16 +161,24 @@ void OculusWorldDemoApp::PopulateScene(const char *fileName)
     Ptr<Fill> imageFill = *CreateTextureFill(pRender, mainFilePathNoExtension + "_OculusCube.tga");
     PopulateCubeFieldScene(&OculusCubesScene, imageFill.GetPtr(), 11, 4, 35, Vector3f(0.0f, 0.0f, -6.0f), 0.5f);
 
-	
-    float r = 0.01f;
-    Ptr<Model> purpleCubesModel = *new Model(Prim_Triangles);
-	for (int i = 0; i < 10; i++)
-		for (int j = 0; j < 10; j++)
-			for (int k = 0; k < 10; k++)
-	            purpleCubesModel->AddSolidColorBox(i*0.25f-1.25f-r,j*0.25f-1.25f-r,k*0.25f-1.25f-r,
-				                                   i*0.25f-1.25f+r,j*0.25f-1.25f+r,k*0.25f-1.25f+r,0xFF9F009F);
-}
+    Ptr<File> imageFile = *new SysFile(mainFilePathNoExtension + "_blueCube.tga");
+    if (imageFile->IsValid())
+        TextureBlueCube = *LoadTextureTgaTopDown(pRender, imageFile, 255, true, true);
 
+    imageFile = *new SysFile(mainFilePathNoExtension + "_redCube.tga");
+    if (imageFile->IsValid())
+        TextureRedCube = *LoadTextureTgaTopDown(pRender, imageFile, 255, true, true);
+
+    imageFile = *new SysFile(mainFilePathNoExtension + "_OculusCube.tga");
+    if (imageFile->IsValid())
+        TextureOculusCube = *LoadTextureTgaTopDown(pRender, imageFile, 255, true, true);
+
+    imageFile = *new SysFile(mainFilePathNoExtension + "_Cockpit_Panel.tga");
+    if (imageFile->IsValid())
+        CockpitPanelTexture = *LoadTextureTgaTopDown(pRender, imageFile, 255, true, true);
+
+
+}
 
 void OculusWorldDemoApp::PopulatePreloadScene()
 {
@@ -168,17 +189,17 @@ void OculusWorldDemoApp::PopulatePreloadScene()
     Ptr<File>    imageFile = *new SysFile(fileName + "_LoadScreen.tga");
     Ptr<Texture> imageTex;
     if (imageFile->IsValid())
-        imageTex = *LoadTextureTga(pRender, imageFile);
+        imageTex = *LoadTextureTgaTopDown(pRender, imageFile);
 
     // Image is rendered as a single quad.
     if (imageTex)
     {
         imageTex->SetSampleMode(Sample_Anisotropic|Sample_Repeat);
         Ptr<Model> m = *new Model(Prim_Triangles);        
-        m->AddVertex(-0.5f,  0.5f,  0.0f, Color(255,255,255,255), 0.0f, 0.0f);
-        m->AddVertex( 0.5f,  0.5f,  0.0f, Color(255,255,255,255), 1.0f, 0.0f);
-        m->AddVertex( 0.5f, -0.5f,  0.0f, Color(255,255,255,255), 1.0f, 1.0f);
-        m->AddVertex(-0.5f, -0.5f,  0.0f, Color(255,255,255,255), 0.0f, 1.0f);
+        m->AddVertex(-0.5f,  0.5f,  0.0f, Color(255,255,255,255), 0.0f, 1.0f);
+        m->AddVertex( 0.5f,  0.5f,  0.0f, Color(255,255,255,255), 1.0f, 1.0f);
+        m->AddVertex( 0.5f, -0.5f,  0.0f, Color(255,255,255,255), 1.0f, 0.0f);
+        m->AddVertex(-0.5f, -0.5f,  0.0f, Color(255,255,255,255), 0.0f, 0.0f);
         m->AddTriangle(2,1,0);
         m->AddTriangle(0,3,2);
 
@@ -205,8 +226,6 @@ void OculusWorldDemoApp::ClearScene()
 
 void OculusWorldDemoApp::RenderAnimatedBlocks(ovrEyeType eye, double appTime)
 {
-    Matrix4f hmdToEyeViewOffset = Matrix4f::Translation(Vector3f(EyeRenderDesc[eye].HmdToEyeViewOffset));
-
     switch (BlocksShowType)
     {
     case 0:
@@ -218,8 +237,8 @@ void OculusWorldDemoApp::RenderAnimatedBlocks(ovrEyeType eye, double appTime)
             // Horizontal circle around your head.
             const int   numBlocks = 10;
             const float radius = 1.0f;
-            Matrix4f    scaleUp = Matrix4f::Scaling(20.0f);
-            double      scaledTime = appTime * 0.1;
+            Matrix4f    scaleUp = Matrix4f::Scaling(20.0f, 40.0f, 20.0f);
+            double      scaledTime = appTime * 0.1 * (double)BlocksSpeed;
             float       fracTime = (float)(scaledTime - floor(scaledTime));
 
             for (int j = 0; j < 2; j++)
@@ -236,8 +255,8 @@ void OculusWorldDemoApp::RenderAnimatedBlocks(ovrEyeType eye, double appTime)
                         pos.x = BlocksCenter.x - radius * cosf(angle);
                         pos.y = BlocksCenter.y - 0.5f;
                     }
-                    Matrix4f mat = Matrix4f::Translation(pos);
-                    SmallGreenCube.Render(pRender, hmdToEyeViewOffset * View * mat * scaleUp);
+                    Matrix4f translate = Matrix4f::Translation(pos);
+                    SmallGreenCube.Render(pRender, ViewFromWorld[eye] * translate * scaleUp);
                 }
             }
         }
@@ -248,8 +267,8 @@ void OculusWorldDemoApp::RenderAnimatedBlocks(ovrEyeType eye, double appTime)
             // Vertical circle around your head.
             const int   numBlocks = 10;
             const float radius = 1.0f;
-            Matrix4f    scaleUp = Matrix4f::Scaling(20.0f);
-            double      scaledTime = appTime * 0.1;
+            Matrix4f    scaleUp = Matrix4f::Scaling(40.0f, 20.0f, 20.0f);
+            double      scaledTime = appTime * 0.1 * (double)BlocksSpeed;
             float       fracTime = (float)(scaledTime - floor(scaledTime));
 
             for (int j = 0; j < 2; j++)
@@ -266,8 +285,8 @@ void OculusWorldDemoApp::RenderAnimatedBlocks(ovrEyeType eye, double appTime)
                         pos.x = BlocksCenter.x - 0.5f;
                         pos.y = BlocksCenter.y - radius * cosf(angle);
                     }
-                    Matrix4f mat = Matrix4f::Translation(pos);
-                    SmallGreenCube.Render(pRender, hmdToEyeViewOffset * View * mat * scaleUp);
+                    Matrix4f translate = Matrix4f::Translation(pos);
+                    SmallGreenCube.Render(pRender, ViewFromWorld[eye] * translate * scaleUp);
                 }
             }
         }
@@ -277,18 +296,18 @@ void OculusWorldDemoApp::RenderAnimatedBlocks(ovrEyeType eye, double appTime)
         {
             // Bouncing.
             const int   numBlocks = 10;
-            Matrix4f    scaleUp = Matrix4f::Scaling(20.0f);
+            Matrix4f    scaleUp = Matrix4f::Scaling(40.0f);
 
             for (int i = 1; i <= numBlocks; i++)
             {
-                double scaledTime = 4.0f * appTime / (double)i;
+                double scaledTime = (double)BlocksSpeed * appTime / (double)i;
                 float fracTime = (float)(scaledTime - floor(scaledTime));
 
                 Vector3f pos = BlocksCenter;
                 pos.z += (float)i;
                 pos.y += -1.5f + 4.0f * (2.0f * fracTime * (1.0f - fracTime));
-                Matrix4f mat = Matrix4f::Translation(pos);
-                SmallGreenCube.Render(pRender, hmdToEyeViewOffset * View * mat * scaleUp);
+                Matrix4f translate = Matrix4f::Translation(pos);
+                SmallGreenCube.Render(pRender, ViewFromWorld[eye] * translate * scaleUp);
             }
         }
         break;
@@ -299,10 +318,8 @@ void OculusWorldDemoApp::RenderAnimatedBlocks(ovrEyeType eye, double appTime)
     }
 }
 
-void OculusWorldDemoApp::RenderGrid(ovrEyeType eye)
+void OculusWorldDemoApp::RenderGrid(ovrEyeType eye, Recti renderViewport)
 {
-    Recti renderViewport = EyeTexture[eye].Header.RenderViewport;    
-
     // Draw actual pixel grid on the RT.
     // 1:1 mapping to screen pixels, origin in top-left.
     Matrix4f ortho;
@@ -313,9 +330,10 @@ void OculusWorldDemoApp::RenderGrid(ovrEyeType eye)
     ortho.M[1][3] = 1.0f;                            // Y offset (Y=down)
     ortho.M[2][2] = 0;
     pRender->SetProjection(ortho);
+    pRender->SetViewport(renderViewport);
 
     pRender->SetDepthMode(false, false);
-    Color cNormal ( 255, 0, 0 );
+    Color cNormal ( 0, 255, 0 );        // Green is the least-smeared colour from CA.
     Color cSpacer ( 255, 255, 0 );
     Color cMid ( 0, 128, 255 );
 

@@ -25,13 +25,7 @@ limitations under the License.
 #define OVR_Render_GL_Win32_Device_h
 
 #include "Render_GL_Device.h"
-
-#ifdef OVR_OS_WIN32
-#include <WinSock2.h>
-#include <WS2tcpip.h>
-#define WIN32_LEAN_AND_MEAN
-#include <Windows.h>
-#endif
+#include "Kernel/OVR_Win32_IncludeWindows.h"
 
 
 namespace OVR { namespace Render { namespace GL { namespace Win32 {
@@ -45,24 +39,17 @@ class RenderDevice : public GL::RenderDevice
 
     HWND Window;
     HGLRC WglContext;
-    Recti PreFullscreen;
-    Recti FSDesktop;
-    HMONITOR HMonitor;
 
 public:
-    RenderDevice(const Render::RendererParams& p, HWND win, HGLRC gl);
+    RenderDevice(ovrHmd hmd, const Render::RendererParams& p, HWND win, HGLRC gl);
     virtual ~RenderDevice() { Shutdown(); }
 
     // Implement static initializer function to create this class.
-    static Render::RenderDevice* CreateDevice(const RendererParams& rp, void* oswnd);
+    static Render::RenderDevice* CreateDevice(ovrHmd hmd, const RendererParams& rp, void* oswnd);
 	
-	virtual ovrRenderAPIConfig Get_ovrRenderAPIConfig() const;
-
     virtual void Shutdown();
     virtual void Present(bool withVsync);
 	bool SetParams(const RendererParams& newParams);
-
-    virtual bool SetFullscreen(DisplayMode fullscreen);
 };
 
 

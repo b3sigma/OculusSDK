@@ -21,8 +21,8 @@ limitations under the License.
 
 *************************************************************************************/
 
-#ifndef INC_RenderProfiler_h
-#define INC_RenderProfiler_h
+#ifndef OVR_RenderProfiler_h
+#define OVR_RenderProfiler_h
 
 #include "OVR_Kernel.h"
 
@@ -59,7 +59,8 @@ public:
     const double* GetAverages() const { return SampleAverage; } 
     const double* GetLastSampleSet() const;
 
-    void          DrawOverlay(RenderDevice* prender);
+    // Returns rendered bounds.
+    Recti          DrawOverlay(RenderDevice* prender, float centerX, float centerY, float textHeight);
 
 private:
 
@@ -68,4 +69,4 @@ private:
     int         SampleCurrentFrame;
 };
 
-#endif // INC_RenderProfiler_h
+#endif // OVR_RenderProfiler_h

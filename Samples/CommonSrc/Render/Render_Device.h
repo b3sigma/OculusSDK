@@ -23,7 +23,7 @@ limitations under the License.
 #ifndef OVR_Render_Device_h
 #define OVR_Render_Device_h
 
-#include "Kernel/OVR_Math.h"
+#include "Extras/OVR_Math.h"
 #include "Kernel/OVR_Array.h"
 #include "Kernel/OVR_RefCount.h"
 #include "Kernel/OVR_String.h"
@@ -31,7 +31,6 @@ limitations under the License.
 #include "Kernel/OVR_Color.h"
 #include "OVR_CAPI.h"
 
-#include "OVR_Stereo.h"
 
 namespace OVR { namespace Render {
 
@@ -94,6 +93,7 @@ enum BuiltinShaders
     FShader_Texture                                 ,
     FShader_AlphaTexture                            ,
 	FShader_AlphaBlendedTexture                     ,
+	FShader_AlphaPremultTexture                     ,
     FShader_PostProcessWithChromAb                  ,
     FShader_LitGouraud                              ,
     FShader_LitTexture                              ,
@@ -104,7 +104,7 @@ enum BuiltinShaders
     FShader_PostProcessHeightmapTimewarp            ,
     FShader_Count                                   ,
 
-    CShader_PostProcess2x2                          = 0,
+    CShader_PostProcess2x2Pentile                   = 0,
     CShader_Count                                   ,
 };
 
@@ -145,6 +145,8 @@ enum TextureFormat
 	Texture_SampleDepth		= 0x20000,
     Texture_GenMipmaps      = 0x40000,
     Texture_SRGB			= 0x80000,
+    Texture_Mirror          = 0x100000,
+    Texture_SwapTextureSet  = 0x200000,
 };
 
 enum SampleMode
@@ -369,9 +371,10 @@ public:
     virtual void SetSampleMode(int sm) = 0;
     virtual void Set(int slot, ShaderStage stage = Shader_Fragment) const = 0;
 	
-	virtual ovrTexture Get_ovrTexture() = 0;
+	//virtual void* GetInternalImplementation() { return NULL; };
 
-	virtual void* GetInternalImplementation() { return NULL; };
+    virtual ovrTexture Get_ovrTexture() = 0;
+    virtual ovrSwapTextureSet* Get_ovrTextureSet() = 0;
 };
 
 struct RenderTarget
@@ -726,55 +729,14 @@ enum PostProcessType
     PostProcess_MeshDistortionTimewarp,
     PostProcess_MeshDistortionPositionalTimewarp,
     PostProcess_MeshDistortionHeightmapTimewarp,
-    PostProcess_Compute2x2,
+    PostProcess_Compute2x2Pentile,
     PostProcess_NoDistortion,
-};
-
-enum DisplayMode
-{
-    Display_Window = 0,
-    Display_Fullscreen = 1,
-    Display_FakeFullscreen
-};
-    
-struct DisplayId
-{
-    // Windows
-    String MonitorName; // Monitor name for fullscreen mode
-    
-    // MacOS
-    int   CgDisplayId; // CGDirectDisplayID
-    
-    DisplayId() : CgDisplayId(-2) {}
-    DisplayId(int id) : CgDisplayId(id) {}
-    DisplayId(String m, int id = -2) : MonitorName(m), CgDisplayId(id) {}
-    
-    operator bool () const
-    {
-        return MonitorName.GetLength() || CgDisplayId;
-    }
-    
-    bool operator== (const DisplayId& b) const
-    {
-        if (MonitorName.IsEmpty() || b.MonitorName.IsEmpty())
-        {
-            return CgDisplayId == b.CgDisplayId;
-        }
-        else
-        {
-            return  strstr(MonitorName.ToCStr(), b.MonitorName.ToCStr()) ||
-                    strstr(b.MonitorName.ToCStr(), MonitorName.ToCStr());
-        }
-    }
 };
 
 struct RendererParams
 {
     ovrRenderAPIType RenderAPIType;              // ovrRenderAPI_D3D11, ovrRenderAPI_OpenGL, etc.
-    int              Multisample;                // If true then multisampling is requested.
     bool             SrgbBackBuffer;             // If true then an SRGB back buffer is requested.
-    int              Fullscreen;                 // Requested full screen vs. windowed. 1 is full screen, else windowed. To do: Change this to bool and update code that is currently dependent on this being an int.
-    DisplayId        Display;                    // Requested display device.
     Sizei            Resolution;                 // Resolution of the rendering buffer used during creation. Allows buffer of different size then the widow if not zero.
     bool             DebugEnabled;               // If true then the renderer (e.g. DirectX, OpenGL) is created with debug support enabled.
 
@@ -785,14 +747,9 @@ struct RendererParams
     bool             GLCompatibilityProfile;     // True if a compatibility profile context was requested (WGL_CONTEXT_COMPATIBILITY_PROFILE_BIT_ARB).
     bool             GLForwardCompatibleProfile; // True if a forward compatible context was requested (WGL_CONTEXT_FORWARD_COMPATIBLE_BIT_ARB).
 
-    RendererParams(int ms = 1) :
-        RenderAPIType(ovrRenderAPI_None), Multisample(ms), SrgbBackBuffer(false), Fullscreen(0), Display(0), Resolution(0), DebugEnabled(false),
+    RendererParams() :
+        RenderAPIType(ovrRenderAPI_None), SrgbBackBuffer(false), Resolution(0), DebugEnabled(false),
         GLMajorVersion(2), GLMinorVersion(1), GLCoreProfile(false), GLCompatibilityProfile(false), GLForwardCompatibleProfile(false){}
-    
-    bool IsDisplaySet() const
-    {
-        return Display;
-    }
 };
 
 
@@ -804,6 +761,7 @@ class RenderDevice : public RefCountBase<RenderDevice>
 {
     friend class StereoGeomShaders;
 protected:
+    ovrHmd              Hmd;
     int                 WindowWidth, WindowHeight;
     RendererParams      Params;
     Recti               VP;
@@ -844,13 +802,15 @@ public:
         Compare_Greater = 2,
         Compare_Count
     };
-    RenderDevice();
+    RenderDevice(ovrHmd hmd);
     virtual ~RenderDevice() { Shutdown(); }
 
     // This static function is implemented in each derived class
     // to support a specific renderer type.
     //static RenderDevice* CreateDevice(const RendererParams& rp, void* oswnd);
 
+    // Called to clear out texture fills by the app layer before it exits
+    virtual void DeleteFills() {}
 
     virtual void Init() {}
     virtual void Shutdown();
@@ -862,31 +822,13 @@ public:
 
     const RendererParams& GetParams() const { return Params; }
 
-	// Returns details needed by CAPI distortion rendering.
-	virtual ovrRenderAPIConfig Get_ovrRenderAPIConfig() const = 0;
-
     // StereoParams apply Viewport, Projection and Distortion simultaneously,
     // doing full configuration for one eye.
-    void        ApplyStereoParams(const StereoEyeParams& params)
-    {
-        SetViewport(params.RenderedViewport);
-        SetProjection(params.RenderedProjection);
-    }
-
     void        ApplyStereoParams(const Recti& vp, const Matrix4f& projection)
     {
         SetViewport(vp);
         SetProjection(projection);
     }
-    // Apply "orthographic" stereo parameters used for rendering 2D HUD overlays.
-    void        ApplyStereoParams2D(StereoEyeParams const &params, Matrix4f const &ortho)
-    {
-        SetViewport(params.RenderedViewport);
-        SetProjection(ortho);
-    }
-
-    
-
 
     virtual void SetViewport(const Recti& vp) = 0;
     void         SetViewport(int x, int y, int w, int h) { SetViewport(Recti(x,y,w,h)); }
@@ -903,7 +845,6 @@ public:
         Clear(r, g, b, a, depth);
     }
 
-    virtual bool IsFullscreen() const { return Params.Fullscreen != Display_Window; }
     virtual void Present ( bool withVsync ) = 0;
     // Waits for rendering to complete; important for reducing latency.
     virtual void WaitUntilGpuIdle() { }
@@ -911,34 +852,23 @@ public:
 
     // Resources
     virtual Buffer*  CreateBuffer() { return NULL; }
-    virtual Texture* CreateTexture(int format, int width, int height, const void* data, int mipcount=1)
-    { OVR_UNUSED5(format,width,height,data, mipcount); return NULL; }
-   
+    virtual Texture* CreateTexture(int format, int width, int height, const void* data, int mipcount = 1)
+    {
+        OVR_UNUSED5(format, width, height, data, mipcount); return NULL;
+    }
+
     virtual bool     GetSamplePositions(Render::Texture*, Vector3f* pos) { pos[0] = Vector3f(0); return 1; }
 
     virtual ShaderSet* CreateShaderSet() { return new ShaderSetMatrixTranspose; }
     virtual Shader* LoadBuiltinShader(ShaderStage stage, int shader) = 0;
 
     // Rendering
-
+    virtual void Blt(Texture* texture) { OVR_UNUSED(texture); }
 
     // Begin drawing directly to the currently selected render target, no post-processing.
     virtual void BeginRendering() {}
     // Begin drawing the primary scene, starting up whatever post-processing may be needed.
     virtual void BeginScene(PostProcessType pp = PostProcess_None);
-    // Call when any of the stereo options change, so precalculation can happen.
-    virtual void PrecalculatePostProcess(PostProcessType pptype,
-                                         const StereoEyeParams &stereoParamsLeft, const StereoEyeParams &stereoParamsRight,
-                                         const HmdRenderInfo &hmdRenderInfo );
-    // Perform postprocessing
-    virtual void ApplyPostProcess(Matrix4f const &matNowFromWorldStart,   Matrix4f const &matNowFromWorldEnd,
-                                  Matrix4f const &matRenderFromWorldLeft, Matrix4f const &matRenderFromWorldRight,
-                                  StereoEyeParams const &stereoParamsLeft, StereoEyeParams const &stereoParamsRight,
-                                  RenderTarget* pHmdSpaceLayerRenderTargetLeftOrBothEyes,
-                                  RenderTarget* pHmdSpaceLayerRenderTargetRight,
-                                  RenderTarget* pStaticLayerRenderTargetLeftOrBothEyes,
-                                  RenderTarget* pStaticLayerRenderTargetRight,
-                                  RenderTarget* pOutputTarget);
 
     // Finish scene.
     virtual void FinishScene();
@@ -986,12 +916,13 @@ public:
 
     virtual void FillRect(float left, float top, float right, float bottom, Color c, const Matrix4f* view = NULL);
     virtual void RenderLines ( int NumLines, Color c, float *x, float *y, float *z = NULL );
-    virtual void FillTexturedRect(float left, float top, float right, float bottom, float ul, float vt, float ur, float vb, Color c, Ptr<Texture> tex);
+    virtual void FillTexturedRect(float left, float top, float right, float bottom, float ul, float vt, float ur, float vb, Color c, Ptr<Texture> tex, const Matrix4f* view, bool premultAlpha = false);
     virtual void FillGradientRect(float left, float top, float right, float bottom, Color col_top, Color col_btm, const Matrix4f* view);
     virtual void RenderImage(float left, float top, float right, float bottom, ShaderFill* image, unsigned char alpha=255, const Matrix4f* view = NULL);
 
-    virtual Fill *CreateSimpleFill(int flags = Fill::F_Solid) = 0;
-    Fill *        CreateTextureFill(Texture* tex, bool useAlpha = false);
+    virtual Fill *GetSimpleFill(int flags = Fill::F_Solid) = 0;
+    virtual Fill *GetTextureFill(Texture* tex, bool useAlpha = false, bool usePremult = false) = 0;
+    Fill *        CreateTextureFill(Texture* tex, bool useAlpha = false, bool usePremult = false);
 
     // Sets the color that is applied around distortion.
     void          SetDistortionClearColor(Color clearColor)
@@ -999,12 +930,6 @@ public:
         DistortionClearColor = clearColor;
     }
 
-    // Don't call these directly, use App/Platform instead
-    virtual bool SetFullscreen(DisplayMode fullscreen)
-    {
-        Params.Fullscreen = fullscreen;
-        return true;
-    }
     virtual void SetWindowSize(int w, int h)
 	{
 		WindowWidth = w;
@@ -1024,7 +949,7 @@ public:
         PostProcessShader_MeshDistortionAndChromAbTimewarp,
         PostProcessShader_MeshDistortionAndChromAbPositionalTimewarp,
         PostProcessShader_MeshDistortionAndChromAbHeightmapTimewarp,
-        PostProcessShader_Compute2x2,
+        PostProcessShader_Compute2x2Pentile,
         PostProcessShader_Count
     };
 
@@ -1095,8 +1020,9 @@ int GetTextureSize(int format, int w, int h);
 // Image size must be a power of 2.
 void FilterRgba2x2(const uint8_t* src, int w, int h, uint8_t* dest);
 
-Texture* LoadTextureTga(RenderDevice* ren, File* f, unsigned char alpha = 255);
-Texture* LoadTextureDDS(RenderDevice* ren, File* f);
+Texture* LoadTextureTgaTopDown (RenderDevice* ren, File* f, unsigned char alpha = 255, bool generatePremultAlpha = false, bool createSwapTextureSet = false);
+Texture* LoadTextureTgaBottomUp(RenderDevice* ren, File* f, unsigned char alpha = 255, bool generatePremultAlpha = false, bool createSwapTextureSet = false);
+Texture* LoadTextureDDSTopDown (RenderDevice* ren, File* f);
 
 
 }} // namespace OVR::Render

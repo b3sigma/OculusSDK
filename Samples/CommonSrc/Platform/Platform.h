@@ -27,6 +27,8 @@ limitations under the License.
 #include "OVR_Kernel.h"
 
 #include "Kernel/OVR_KeyCodes.h"
+#include "Kernel/OVR_String.h"
+
 
 namespace OVR { namespace Render {
     class RenderDevice;
@@ -73,7 +75,7 @@ enum Modifiers
 //-------------------------------------------------------------------------------------
 // ***** SetupGraphicsDeviceSet
 
-typedef RenderDevice* (*RenderDeviceCreateFunc)(const Render::RendererParams&, void*);
+typedef RenderDevice* (*RenderDeviceCreateFunc)(ovrHmd hmd, const Render::RendererParams&, void*);
 
 // SetupGraphicsDeviceSet is a PlatformCore::SetupGraphics initialization helper class,
 // used to build up a list of RenderDevices that can be used for rendering.
@@ -127,10 +129,8 @@ public:
 
     virtual void		ShowWindow(bool visible) = 0;
     
-    virtual bool		SetFullscreen(const Render::RendererParams& rp, int fullscreen);
-   
     // Search for a matching graphics renderer based on type argument and initializes it.    
-    virtual RenderDevice* SetupGraphics(const SetupGraphicsDeviceSet& setupGraphicsDesc,
+    virtual RenderDevice* SetupGraphics(ovrHmd hmd, const SetupGraphicsDeviceSet& setupGraphicsDesc,
                                         const char* gtype,
                                         const Render::RendererParams& rp) = 0;
 
@@ -140,8 +140,6 @@ public:
 
     virtual void		SetWindowTitle(const char*title) = 0;
 	virtual void		PlayMusicFile(const char *fileName) { OVR_UNUSED(fileName); }
-    virtual int			GetDisplayCount() { return 0; }
-    virtual Render::DisplayId GetDisplay(int screen);
     
     // Get time since start of application in seconds.
     double				GetAppTime() const; 
@@ -194,5 +192,54 @@ public:
 
 
 }}
+
+
+// OVR_PLATFORM_APP_ARGS specifies the Application class to use for startup,
+// providing it with startup arguments.
+#if !defined(OVR_PLATFORM_APP_ARGS)
+    #define OVR_PLATFORM_APP_ARGS(AppClass, args)                                                   \
+        OVR::OvrPlatform::Application* OVR::OvrPlatform::Application::CreateApplication()           \
+        {                                                                                           \
+            OVR::System::Init(OVR::Log::ConfigureDefaultLog(OVR::LogMask_All));                     \
+            return new AppClass args;                                                               \
+        }                                                                                           \
+                                                                                                    \
+        void OVR::OvrPlatform::Application::DestroyApplication(OVR::OvrPlatform::Application* app)  \
+        {                                                                                           \
+            OVR::OvrPlatform::PlatformCore* platform = app->pPlatform;                              \
+            delete app;                                                                             \
+            delete platform;                                                                        \
+            OVR::System::Destroy();                                                                 \
+        }
+#endif
+
+// OVR_PLATFORM_APP_ARGS specifies the Application startup class with no args.
+#if !defined(OVR_PLATFORM_APP)
+    #define OVR_PLATFORM_APP(AppClass) OVR_PLATFORM_APP_ARGS(AppClass, ())
+#endif
+
+
+#if !defined(OVR_PLATFORM_APP_ARGS_WITH_LOG)
+    #define OVR_PLATFORM_APP_ARGS_WITH_LOG(AppClass, LogClass, args)                                \
+	    OVR::OvrPlatform::Application* OVR::OvrPlatform::Application::CreateApplication()           \
+	    {                                                                                           \
+            static LogClass log;                                                                    \
+            OVR::System::Init(&log);                                                                \
+	        return new AppClass args;                                                               \
+        }                                                                                           \
+                                                                                                    \
+	    void OVR::OvrPlatform::Application::DestroyApplication(OVR::OvrPlatform::Application* app)  \
+	    {                                                                                           \
+            OVR::OvrPlatform::PlatformCore* platform = app->pPlatform;                              \
+	        delete app;                                                                             \
+            delete platform;                                                                        \
+            OVR::System::Destroy();                                                                 \
+        }
+#endif
+
+#if !defined(OVR_PLATFORM_APP_ARGS_WITH_LOG)
+    #define OVR_PLATFORM_APP_WITH_LOG(AppClass, LogClass) OVR_PLATFORM_APP_ARGS_WITH_LOG(AppClass, LogClass, ())
+#endif
+
 
 #endif

@@ -21,11 +21,8 @@ limitations under the License.
 
 ************************************************************************************/
 
-#include <WinSock2.h>
-#include <WS2tcpip.h>
-#define WIN32_LEAN_AND_MEAN
-#include <Windows.h>
-//#include <playsoundapi.h>
+#include "Kernel/OVR_Win32_IncludeWindows.h"
+#include <mmsystem.h>
 
 #include "Kernel/OVR_System.h"
 #include "Kernel/OVR_Array.h"
@@ -39,7 +36,8 @@ namespace OVR { namespace OvrPlatform { namespace Win32 {
 
 
 PlatformCore::PlatformCore(Application* app, HINSTANCE hinst)
-  : OvrPlatform::PlatformCore(app), hWnd(NULL), hInstance(hinst), Quit(false), ExitCode(0), Width(0), Height(0), MMode(Mouse_Normal),
+  : OvrPlatform::PlatformCore(app), hWnd(NULL), hInstance(hinst), Quit(false), ExitCode(0), Width(0), Height(0),
+    MMode(Mouse_Normal), MouseWheelTimer(0),
     /*WindowCenter,*/ Cursor(NULL), Modifiers(0), WindowTitle("App")
 {
     WindowCenter.x = 0;
@@ -49,6 +47,7 @@ PlatformCore::PlatformCore(Application* app, HINSTANCE hinst)
 
 PlatformCore::~PlatformCore()
 {
+    DestroyWindow();
 }
 
 static LPCWSTR WindowClassName = L"OVRPlatAppWindow";
@@ -104,12 +103,6 @@ void* PlatformCore::SetupWindow(int w, int h)
 
 void PlatformCore::DestroyWindow()
 {
-    // Release renderer.
-    pRender.Clear();
-
-    // Release gamepad.
-    pGamepadManager.Clear();
-
     // Release window resources.
     ::DestroyWindow(hWnd);
     UnregisterClassW(WindowClassName, hInstance);
@@ -117,7 +110,13 @@ void PlatformCore::DestroyWindow()
     Width = Height = 0;
 
     //DestroyCursor(Cursor);
-    Cursor = 0;    
+    Cursor = 0;
+
+    // Release renderer.
+    pRender.Clear();
+
+    // Release gamepad.
+    pGamepadManager.Clear();
 }
 
 void PlatformCore::ShowWindow(bool visible)
@@ -307,6 +306,30 @@ LRESULT PlatformCore::WindowProc(UINT msg, WPARAM wp, LPARAM lp)
         }
         break;
 
+    case WM_MOUSEWHEEL:
+        {
+            int z = GET_WHEEL_DELTA_WPARAM(wp);
+            // synthesize keystrokes
+            pApp->OnKey(Key_MouseWheelAwayFromUser, 0, (z > 0), Modifiers);
+            pApp->OnKey(Key_MouseWheelTowardUser, 0, (z < 0), Modifiers);
+            // use a timer to synthesize holding down the key for 100ms
+            if (MouseWheelTimer)
+                KillTimer(hWnd, MouseWheelTimer);
+            MouseWheelTimer = SetTimer(hWnd, WM_MOUSEWHEEL, 100, NULL);
+        }
+        break;
+
+    case WM_TIMER:
+        if (wp == WM_MOUSEWHEEL)
+        {
+            if (MouseWheelTimer)
+                KillTimer(hWnd, MouseWheelTimer);
+            MouseWheelTimer = 0;
+            pApp->OnKey(Key_MouseWheelAwayFromUser, 0, false, Modifiers);
+            pApp->OnKey(Key_MouseWheelTowardUser, 0, false, Modifiers);
+        }
+        break;
+
     case WM_MOVE:
         {
             RECT r;
@@ -426,6 +449,8 @@ LRESULT PlatformCore::WindowProc(UINT msg, WPARAM wp, LPARAM lp)
 
 int PlatformCore::Run()
 {
+    ovr_TraceMessage(ovrLogLevel_Info, "PlatformCore::Run start");
+
     while (!Quit)
     {
         MSG msg;
@@ -446,17 +471,19 @@ int PlatformCore::Run()
         }
     }
 
+    ovr_TraceMessage(ovrLogLevel_Info, "PlatformCore::Run exit");
+
     return ExitCode;
 }
 
 
-RenderDevice* PlatformCore::SetupGraphics(const SetupGraphicsDeviceSet& setupGraphicsDesc,
+RenderDevice* PlatformCore::SetupGraphics(ovrHmd hmd, const SetupGraphicsDeviceSet& setupGraphicsDesc,
                                           const char* type, const Render::RendererParams& rp)
 {
     const SetupGraphicsDeviceSet* setupDesc = setupGraphicsDesc.PickSetupDevice(type);
     OVR_ASSERT(setupDesc);
 
-    pRender = *setupDesc->pCreateDevice(rp, (void*)hWnd);
+    pRender = *setupDesc->pCreateDevice(hmd, rp, (void*)hWnd);
     if (pRender)
         pRender->SetWindowSize(Width, Height);
 
@@ -472,97 +499,6 @@ void PlatformCore::PlayMusicFile(const char *fileName)
 
 
 //-----------------------------------------------------------------------------
-
-// Used to capture all the active monitor handles
-struct MonitorSet
-{
-    enum { MaxMonitors = 8 };
-    HMONITOR Monitors[MaxMonitors];
-    int      MonitorCount;
-    int      PrimaryCount;
-};
-
-
-BOOL CALLBACK MonitorEnumProc(HMONITOR hMonitor, HDC, LPRECT, LPARAM dwData)
-{
-    MonitorSet* monitorSet = (MonitorSet*)dwData;
-    if (monitorSet->MonitorCount >= MonitorSet::MaxMonitors)
-        return FALSE;
-
-    monitorSet->Monitors[monitorSet->MonitorCount] = hMonitor;
-    monitorSet->MonitorCount++;
-    return TRUE;
-};
-
-
-// Returns the number of active screens for extended displays and 1 for mirrored display
-int PlatformCore::GetDisplayCount()
-{
-    // Get all the monitor handles
-    MonitorSet monitors;
-    monitors.MonitorCount = 0;
-    EnumDisplayMonitors(NULL, NULL, MonitorEnumProc, (LPARAM)&monitors);
-
-    // Count the primary monitors
-    int primary = 0;
-    MONITORINFOEX info;
-    for (int m=0; m < monitors.MonitorCount; m++)
-    {
-        info.cbSize = sizeof(MONITORINFOEX);
-        GetMonitorInfo(monitors.Monitors[m], &info);
-        
-        if (info.dwFlags & MONITORINFOF_PRIMARY)
-           primary++;
-    }
-
-    if (primary > 1)
-        return 1;                      // Regard mirrored displays as a single screen
-    else
-        return monitors.MonitorCount;  // Return all extended displays 
-}
-
-//-----------------------------------------------------------------------------
-// Returns the device name for the given screen index or empty string for invalid index
-// The zero index will always return the primary screen name
-Render::DisplayId PlatformCore::GetDisplay(int screen)
-{
-    // Get all the monitor handles
-    MonitorSet monitors;
-    monitors.MonitorCount = 0;
-    EnumDisplayMonitors(NULL, NULL, MonitorEnumProc, (LPARAM)&monitors);
-
-    String screen_name;
-
-    // Get the name of the suppled screen index with the requirement
-    // that screen 0 is the primary monitor
-    int non_primary_count = 0;
-    MONITORINFOEX info;
-    for (int m=0; m < monitors.MonitorCount; m++)
-    {
-        info.cbSize = sizeof(MONITORINFOEX);
-        GetMonitorInfo(monitors.Monitors[m], &info);
-        
-        if (info.dwFlags & MONITORINFOF_PRIMARY)
-        {
-            if (screen == 0)
-            {
-                screen_name = info.szDevice;
-                break;
-            }
-        }
-        else
-        {
-            non_primary_count++;
-            if (screen == non_primary_count)
-            {
-                screen_name = info.szDevice;
-                break;
-            }
-        }
-    }
-
-    return screen_name;
-}
 
 // Creates notification overlay text box over the top of OS window.
 void  PlatformCore::SetNotificationOverlay(int index, int fontHeightPixels,
@@ -611,7 +547,7 @@ NotificationOverlay::NotificationOverlay(PlatformCore* core, int fontHeightPixel
     ::SelectObject(dc, hFont);
     TextSize.cx = TextSize.cy = 0;
     ::GetTextExtentPoint32W(dc, &buffer[0], (int)textLength, &TextSize);
-    ::DeleteDC(dc);
+    ::DeleteObject(dc); // Could also use DeleteDC, but some analysis tools expect DeleteObject.
 
     int vpos = (YOffest > 0) ? YOffest : (pCore->Height + YOffest - (TextSize.cy + 7));
 

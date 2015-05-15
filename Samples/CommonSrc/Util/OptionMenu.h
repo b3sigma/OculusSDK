@@ -21,8 +21,8 @@ limitations under the License.
 
 *************************************************************************************/
 
-#ifndef INC_OptionMenu_h
-#define INC_OptionMenu_h
+#ifndef OVR_OptionMenu_h
+#define OVR_OptionMenu_h
 
 #include "OVR_Kernel.h"
 
@@ -30,14 +30,9 @@ limitations under the License.
 #include "../Render/Render_Device.h"
 #include "../Platform/Gamepad.h"
 
-#include "Util/Util_Render_Stereo.h"
-using namespace OVR::Util::Render;
-
 #include <Kernel/OVR_SysFile.h>
 #include <Kernel/OVR_Log.h>
 #include <Kernel/OVR_Timer.h>
-
-#include "Sensors/OVR_DeviceConstants.h"
 
 
 using namespace OVR;
@@ -321,7 +316,8 @@ public:
     bool OnKey(OVR::KeyCode key, int chr, bool down, int modifiers);
     bool OnGamepad(uint32_t buttonMask);
 
-    void Render(RenderDevice* prender, String title = "");
+    // Returns rendered bounds.
+    Recti Render(RenderDevice* prender, String title, float textHeight, float centerX, float centerY);
     
     void AddItem(OptionMenuItem* menuItem);
 
@@ -361,6 +357,20 @@ public:
         return *p;
     }
     
+        // Adds an Int variable. Returns added item to allow customization.
+    OptionVar& AddInt(   const char* name, int32_t* pvar, 
+                         int32_t min, int32_t max, int32_t stepSize = 1,
+                         const char* formatString = "%d",
+                         OptionVar::FormatFunction formatFunction = 0, // Default formatting.
+                         OptionVar::UpdateFunction updateFunction = 0 )
+    {
+        OptionVar* p = new OptionVar(name, pvar, min, max, stepSize,
+                                     formatString,
+                                     formatFunction, updateFunction);
+        AddItem(p);
+        return *p;
+    }
+
     OptionVar& AddTrigger( const char* name, OptionVar::UpdateFunction updateFunction = 0 )
     {
         OptionVar* p = new OptionVar(name, NULL, OptionVar::Type_Trigger,
@@ -382,11 +392,15 @@ public:
     // intended to be called right after SetPopupMessage.
     void            SetPopupTimeout(double timeoutSeconds, bool border = false);
 
+    // If the menu is not visible, it still shows a message when an option changes.
+    // You can disable that with this.
+    void            SetShortcutChangeMessageEnable ( bool enabled );
+
     virtual bool    IsMenu() const { return true; }
 
 protected:
 
-    void renderShortcutChangeMessage(RenderDevice* prender);
+    Recti renderShortcutChangeMessage(RenderDevice* prender, float textSize, float centerX, float centerY);
 
 public:
     OptionSelectionMenu* GetSubmenu();
@@ -409,6 +423,8 @@ public:
     String                    PopupMessage;
     double                    PopupMessageTimeout;
     bool                      PopupMessageBorder;
+
+    bool                      RenderShortcutChangeMessages;
 
     // Possible menu navigation actions.
     enum NavigationActions
@@ -450,11 +466,12 @@ enum DrawTextCenterType
     DrawText_Border  = 0x10,
 };
 
-void    DrawTextBox(RenderDevice* prender, float x, float y,
+// Returns rendered bounds.
+Recti    DrawTextBox(RenderDevice* prender, float x, float y,
                     float textSize, const char* text,
                     unsigned centerType = DrawText_NoCenter);
 
 void    CleanupDrawTextFont();
 
 
-#endif // INC_OptionMenu_h
+#endif // OVR_OptionMenu_h
